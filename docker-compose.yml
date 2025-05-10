@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    container_name: postgres
+    environment:
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: devdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+      - ./backups/postgres:/backups
+
+volumes:
+  postgres_data:
+  mssql_data: 

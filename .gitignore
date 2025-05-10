@@ -11,3 +11,4 @@ wheels/
 
 .env
 osm_nodes.csv
+postgres_data/
