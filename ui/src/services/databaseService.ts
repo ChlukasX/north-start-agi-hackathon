@@ -17,23 +17,17 @@ export interface ApiError {
   detail: string; // Matches FastAPI's HTTPException detail
 }
 
-// New types for the /query endpoint
+// Updated types for the /chat endpoint
 export interface QueryPayload {
-  agent_type: string;
-  query: string;
+  session_id: string; // Changed from agent_type
+  message: string; // Changed from query
 }
 
-// Assuming the success response for /query might be more complex,
-// but based on the error, the error structure is ApiError.
-// If there's a specific success response structure, define it here.
-// For now, we'll assume it might return a generic object or the same ApiError structure on success too.
 export interface QueryResponse {
-  // Example: Define what a successful response would look like
-  // result?: string;
-  // data?: any;
-  // Or if the response structure is variable or unknown for success:
-  [key: string]: any; // Allows any properties
-  detail?: string; // To accommodate responses like the error example
+  // To ensure compatibility with chat.tsx, we expect a 'response' field for the AI message.
+  response?: string; // For the AI's textual reply e.g. {"response": "Hello there!"}
+  [key: string]: any; // Allows other properties that might come with the response
+  detail?: string; // To accommodate responses like FastAPI error details
 }
 
 // --- API Service Functions ---
@@ -44,11 +38,9 @@ export interface QueryResponse {
 export const connectToDb = async (): Promise<ConnectResponse> => {
   const response = await fetch(`${API_BASE_URL}/connect`, {
     method: "POST",
-    // No 'Content-Type' or body is needed for this specific endpoint as defined in main.py
   });
 
   if (!response.ok) {
-    // Attempt to parse error response from FastAPI
     const errorData: ApiError = await response
       .json()
       .catch(() => ({ detail: "Unknown error occurred" }));
@@ -79,7 +71,6 @@ export const getColumnsForTable = async (
   tableName: string,
 ): Promise<ColumnsResponse> => {
   if (!tableName || tableName.trim() === "") {
-    // Consistent with backend, though client-side check is good too
     return Promise.reject({
       detail: "Table name cannot be empty.",
     } as ApiError);
@@ -99,24 +90,27 @@ export const getColumnsForTable = async (
 };
 
 /**
- * Posts a query to the backend.
- * @param userQuery - The query message from the user.
+ * Posts a chat message to the backend.
+ * @param userMessageContent - The message content from the user.
  */
 export const postUserQuery = async (
-  userQuery: string,
+  // Renaming userQuery to userMessageContent for clarity internally
+  userMessageContent: string,
 ): Promise<QueryResponse> => {
-  if (!userQuery || userQuery.trim() === "") {
+  if (!userMessageContent || userMessageContent.trim() === "") {
     return Promise.reject({
-      detail: "Query message cannot be empty.",
+      detail: "Message content cannot be empty.", // Updated error message
     } as ApiError);
   }
 
+  // Updated payload structure
   const payload: QueryPayload = {
-    agent_type: "data access", // As per your curl command
-    query: userQuery,
+    session_id: "u123", // As per your curl command example
+    message: userMessageContent,
   };
 
-  const response = await fetch(`${API_BASE_URL}/query`, {
+  // Updated endpoint to /chat
+  const response = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -124,19 +118,14 @@ export const postUserQuery = async (
     body: JSON.stringify(payload),
   });
 
-  // The response might be an error (like the API key issue) or a success.
-  // FastAPI often returns JSON for both, and HTTP status codes differentiate.
   const responseData = await response.json().catch(() => {
-    // If JSON parsing fails for a non-OK response, create a generic error
     if (!response.ok) {
       return { detail: `Request failed with status ${response.status}` };
     }
-    // If JSON parsing fails for an OK response, it's unexpected
     return { detail: "Failed to parse response JSON." };
   });
 
   if (!response.ok) {
-    // Ensure the errorData conforms to ApiError or QueryResponse (which includes detail)
     throw responseData as ApiError;
   }
 
@@ -147,7 +136,6 @@ export const postUserQuery = async (
 
 /**
  * Hook to manage connecting to the database.
- * Provides a `connect` function and states for loading, error, and data.
  */
 export const useConnectToDb = () => {
   const [data, setData] = useState<ConnectResponse | null>(null);
@@ -165,7 +153,7 @@ export const useConnectToDb = () => {
     } catch (err) {
       setError(err as ApiError);
       setIsLoading(false);
-      throw err; // Re-throw for component-level handling if needed
+      throw err;
     }
   }, []);
 
@@ -174,7 +162,6 @@ export const useConnectToDb = () => {
 
 /**
  * Hook to manage fetching all table names.
- * Provides a `WorkspaceTables` function and states for loading, error, and data.
  */
 export const useGetAllTables = () => {
   const [data, setData] = useState<TablesResponse | null>(null);
@@ -201,9 +188,6 @@ export const useGetAllTables = () => {
 
 /**
  * Hook to manage fetching columns for a specific table.
- * @param initialTableName - Optional. If provided, columns for this table will be fetched on mount.
- * Provides a `WorkspaceColumns` function and states for loading, error, and data.
- * Also returns `WorkspaceedForTable` to indicate which table the current data belongs to.
  */
 export const useGetColumnsForTable = (initialTableName?: string | null) => {
   const [data, setData] = useState<ColumnsResponse | null>(null);
@@ -215,8 +199,8 @@ export const useGetColumnsForTable = (initialTableName?: string | null) => {
     if (!tableName || tableName.trim() === "") {
       setData(null);
       setFetchedForTable(null);
-      setError({ detail: "Table name is required to fetch columns." }); // Set an error state
-      return; // Don't attempt to fetch
+      setError({ detail: "Table name is required to fetch columns." });
+      return;
     }
 
     setIsLoading(true);
@@ -229,73 +213,73 @@ export const useGetColumnsForTable = (initialTableName?: string | null) => {
       return result;
     } catch (err) {
       setError(err as ApiError);
-      setData(null); // Clear data on error
-      setFetchedForTable(null); // Clear associated table name on error
+      setData(null);
+      setFetchedForTable(null);
       setIsLoading(false);
       throw err;
     }
-  }, []); // getColumnsForTable is stable (module scope)
+  }, []);
 
   useEffect(() => {
     if (initialTableName && initialTableName.trim() !== "") {
       fetchColumns(initialTableName);
     } else {
-      // If initialTableName is null, empty, or whitespace, ensure no data is shown.
       setData(null);
       setFetchedForTable(null);
-      // Optionally clear error or set a specific state if needed
-      // setError(null);
     }
-  }, [initialTableName, fetchColumns]); // Re-run if initialTableName or fetchColumns changes
+  }, [initialTableName, fetchColumns]);
 
   return { fetchColumns, data, isLoading, error, fetchedForTable };
 };
 
 /**
- * Hook to manage posting a user query.
- * Provides a `submitQuery` function and states for loading, error, and data.
+ * Hook to manage posting a user message and getting a chat response.
  */
 export const useSubmitQuery = () => {
+  // Hook name remains the same for minimal changes in chat.tsx
   const [data, setData] = useState<QueryResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const submitQuery = useCallback(async (userQuery: string) => {
-    if (!userQuery || userQuery.trim() === "") {
-      setError({ detail: "Query message cannot be empty." });
+  // The parameter 'userQuery' from chat.tsx will become the 'message' in the payload.
+  const submitQuery = useCallback(async (userMessageContent: string) => {
+    if (!userMessageContent || userMessageContent.trim() === "") {
+      setError({ detail: "Message content cannot be empty." }); // Updated error message
       setData(null);
-      return; // Don't attempt to submit
+      return;
     }
     setIsLoading(true);
     setError(null);
+    setData(null); // Clear previous data
     try {
-      const result = await postUserQuery(userQuery);
+      const result = await postUserQuery(userMessageContent); // postUserQuery now uses /chat
       setData(result);
       setIsLoading(false);
-      // If the result itself contains a 'detail' field and implies an error
-      // (e.g. the Google API key error, which might come with a 200 OK or a specific error code)
-      // you might want to move it to the error state.
-      // However, the current postUserQuery throws an error for non-ok responses.
-      // If 'detail' can appear in successful (2xx) responses as an error message:
+
+      // The responseIndicatesError logic might need adjustment if the /chat
+      // endpoint has a different way of signaling errors in a 2xx response.
+      // For now, assuming 'detail' in a 2xx response is still an error indicator.
       if (result.detail && responseIndicatesError(result)) {
-        // You'd need a helper responseIndicatesError
         setError({ detail: result.detail });
-        setData(null); // Clear data if it's considered an error
+        setData(null);
       }
       return result;
     } catch (err) {
       setError(err as ApiError);
       setData(null);
       setIsLoading(false);
-      throw err; // Re-throw for component-level handling if needed
+      throw err;
     }
   }, []);
 
-  // Helper function to determine if a response, even if 2xx, indicates an error
-  // This is an example, you might need to adjust its logic based on your API behavior
+  // This helper might need adjustment based on how your /chat endpoint signals
+  // application-level errors within a successful HTTP response.
   const responseIndicatesError = (response: QueryResponse): boolean => {
-    // Example: if the response has a 'detail' field and no other 'success' field
-    return typeof response.detail === "string" && !response.successProperty; // Adjust 'successProperty'
+    // Example: if the response has a 'detail' field and no 'response' field (actual chat reply)
+    return (
+      typeof response.detail === "string" &&
+      typeof response.response === "undefined"
+    );
   };
 
   return { submitQuery, data, isLoading, error };
