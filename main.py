@@ -1,10 +1,17 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from typing import List, Dict
 from agent_factory import AgentFactory
 from pydantic import BaseModel
-from utils import PostgresDB
+from enviroment_setup import setup_environment
+
+# Set up environment variables and configuration
+config = setup_environment()
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 try:
     from utils.database_connection import PostgresDB
@@ -15,19 +22,10 @@ except ImportError:
         "database_connection.py not found. Please ensure it exists with the PostgresDB class."
     )
 
-# Database configuration (matches your docker-compose)
-DB_CONFIG = {
-    "host": "localhost",  # This should be 'postgres' if FastAPI runs in the same Docker network
-    # or the host IP if FastAPI runs outside Docker accessing the mapped port.
-    # For local development with port mapping 5433:5432, 'localhost' and port 5433 is correct.
-    "port": "5433",
-    "user": "devuser",
-    "password": "devpassword",
-    "dbname": "devdb",
-}
+# Use environment variables for database configuration
+DB_CONFIG = config["db_config"]
 
 # Global instance of the database manager
-# This instance will persist across requests as long as the FastAPI app is running.
 db = PostgresDB(
     dbname=DB_CONFIG["dbname"],
     user=DB_CONFIG["user"],
@@ -39,16 +37,38 @@ db = PostgresDB(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Log API key status
+    if config["openai_api_key"]:
+        logger.info("OpenAI API key is configured")
+    else:
+        logger.warning(
+            "OpenAI API key is not configured. OpenAI-based agents will not work."
+        )
+
+    if config["google_api_key"]:
+        logger.info("Google API key is configured")
+    else:
+        logger.warning(
+            "Google API key is not configured. Google-based agents will not work."
+        )
+
+    # Connect to database
     if db.connect():
-        print("Application startup: attempting to connect to the database...")
+        logger.info("Application startup: Successfully connected to the database")
+    else:
+        logger.error("Application startup: Failed to connect to the database")
+
     yield
+
+    # Disconnect from database
     db.disconnect()
+    logger.info("Application shutdown: Disconnected from the database")
 
 
 app = FastAPI(
     lifespan=lifespan,
-    title="PostgreSQL Interaction API",
-    description="API to connect, disconnect, and query a PostgreSQL database.",
+    title="Agent API",
+    description="API to connect with agents and query a PostgreSQL database.",
     version="1.0.0",
 )
 
@@ -171,6 +191,7 @@ async def get_all_columns(
     return columns
 
 
+# Agent management cache
 agent_instances = {}
 
 
@@ -179,26 +200,71 @@ class QueryRequest(BaseModel):
     query: str
 
 
-async def get_agent(agent_type: str):
-    if agent_type not in agent_instances:
-        try:
-            agent_instances[agent_type] = AgentFactory.create_agent(agent_type)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    return agent_instances[agent_type]
-
-
-@app.post("/query")
-async def process_query(
-    db_instance: PostgresDB = Depends(get_database_instance),
-    request=QueryRequest,
-    agent=Depends(get_agent),
-):
+@app.post("/query", tags=["Agent Operations"], summary="Process a query using an agent")
+async def process_query(request: QueryRequest):
+    """
+    Processes a query using the specified agent type.
+    """
     try:
-        response = await asyncio.to_thread(agent.llm, request.query)
-        return {"response": response}
+        # Validate API keys based on agent type
+        if request.agent_type.lower() == "example" and not config["openai_api_key"]:
+            raise HTTPException(
+                status_code=400,
+                detail="OpenAI API key not configured. This agent requires an OpenAI API key.",
+            )
+        elif (
+            request.agent_type.lower() == "data access" and not config["google_api_key"]
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Google API key not configured. This agent requires a Google API key.",
+            )
+
+        # Get or create the agent instance
+        if request.agent_type not in agent_instances:
+            try:
+                agent_instances[request.agent_type] = AgentFactory.create_agent(
+                    request.agent_type
+                )
+                logger.info(f"Created new agent instance of type: {request.agent_type}")
+            except ValueError as e:
+                logger.error(f"Invalid agent type requested: {request.agent_type}")
+                raise HTTPException(status_code=400, detail=str(e))
+
+        agent = agent_instances[request.agent_type]
+
+        # Process the query with the agent
+        logger.info(
+            f"Processing query with {request.agent_type} agent: {request.query}"
+        )
+        response = []
+        try:
+            for step in agent.llm(request.query):
+                if "messages" in step and len(step["messages"]) > 0:
+                    response.append(step["messages"][-1].content)
+                    logger.debug(
+                        f"Agent response step: {step['messages'][-1].content[:50]}..."
+                    )
+        except Exception as e:
+            logger.error(f"Error during agent processing: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Error during agent processing: {str(e)}"
+            )
+
+        # Return the final response
+        final_response = response[-1] if response else "No response generated"
+        logger.info(
+            f"Query processed successfully, response length: {len(final_response)}"
+        )
+        return {"response": final_response}
+
+    except HTTPException:
+        # Re-raise HTTP exceptions directly
+        raise
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error processing query: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
 
 
 @app.get("/")
@@ -214,3 +280,4 @@ async def root():
 # - GET  http://localhost:8000/status
 # - GET  http://localhost:8000/tables
 # - GET  http://localhost:8000/tables/your_table_name/columns
+# - POST http://localhost:8000/query (with JSON body: {"agent_type": "example", "query": "your question"})

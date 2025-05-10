@@ -10,5 +10,6 @@ wheels/
 .venv
 
 .env
+data
 osm_nodes.csv
 postgres_data/
