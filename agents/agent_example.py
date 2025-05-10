@@ -1,5 +1,5 @@
 from langchain_openai import ChatOpenAI
-from base_agent import BaseAgent
+from .base_agent import BaseAgent
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
