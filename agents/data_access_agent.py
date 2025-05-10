@@ -6,7 +6,7 @@ from langgraph.prebuilt import create_react_agent
 from agents.base_agent import BaseAgent
 
 
-class data_access_agent(BaseAgent):
+class DataAccessAgent(BaseAgent):
     def __init__(self):
         super().__init__()
 
