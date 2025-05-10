@@ -1,4 +1,6 @@
-from api import DB_URL, MODEL_STR
+
+from __future__ import annotations
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 import pandas as pd
 from sqlalchemy import create_engine
@@ -13,7 +15,6 @@ from sklearn.preprocessing import normalize
 import hdbscan
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-from __future__ import annotations
 from typing import List, Dict, Any
 import json
 import pandas as pd
@@ -34,6 +35,8 @@ import pandas as pd
 from sqlalchemy import create_engine
 from langchain.sql_database import SQLDatabase
 from langchain.tools import Tool
+
+from config import DB_URL, MODEL_STR
 
 
 gemini = ChatGoogleGenerativeAI(
@@ -232,73 +235,7 @@ def _flatten_json_series(s: pd.Series, prefix: str, sep="_") -> pd.DataFrame:
         return {px[:-1]: v}
     return pd.json_normalize(s.map(lambda x: flat(x, f"{prefix}{sep}")))
 
-# ------------------- summarizer with auto‑detection -------------------
-def summarize_category_with_llm(
-    df: pd.DataFrame,
-    category: str,
-    llm,
-    id_col: str                = "id",
-    auto_sample: int           = 50         # rows per column to test for JSON
-) -> Dict[str, Any]:
-    """
-    1) Filters df to `category`
-    2) Auto‑detects JSON‑like columns and flattens them
-    3) Computes per‑column stats
-    4) Returns stats + LLM narrative
-    """
-    sub = df[df["generated_category"] == category].copy()
-    if sub.empty:
-        return {"summary": {}, "narrative": f"No records for '{category}'."}
 
-    # 1⃣  auto‑detect and flatten all JSON‑ish columns
-    json_cols = _auto_json_columns(sub, sample=auto_sample)
-    flat_parts = [sub]
-    for jc in json_cols:
-        flat_parts.append(_flatten_json_series(sub[jc], jc))
-    wide = pd.concat(flat_parts, axis=1).drop(columns=json_cols)
-
-    # 2⃣  quick type-aware stats
-    summary = {"category": category, "n_rows": len(wide), "columns": {}}
-    for col in wide.columns:
-        if col in ("assigned_category", "geometry"):
-            continue
-        ser = wide[col].dropna()
-        if ser.empty:
-            summary["columns"][col] = {"all_null": True}
-            continue
-        if ser.dtype.kind in "if":
-            summary["columns"][col] = {
-                "type": "numeric",
-                "min": ser.min(),
-                "max": ser.max(),
-                "mean": ser.mean(),
-                "p50": ser.quantile(.5),
-                "p95": ser.quantile(.95),
-            }
-        elif ser.dtype == bool or ser.isin([0, 1]).all():
-            summary["columns"][col] = {
-                "type": "boolean",
-                "pct_true": float(ser.mean()),
-            }
-        else:
-            top = ser.value_counts().head(5)
-            summary["columns"][col] = {
-                "type": "categorical",
-                "distinct": int(ser.nunique()),
-                "top_values": top.to_dict(),
-            }
-
-    # 3⃣  Ask LLM for narrative
-    prompt = f"""
-You are a data analyst. Summarize these statistics for the category "{category}"
-in 3‑4 sentences, highlighting notable patterns in markdown format.
-
-Stats JSON:
-{json.dumps(summary, indent=2)}
-"""
-    narrative = llm.predict(prompt).strip()
-
-    return {"summary": summary, "narrative": narrative}
 
 
 def _infer_pg_dtype(series: pd.Series):
