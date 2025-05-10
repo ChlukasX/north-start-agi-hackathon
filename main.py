@@ -6,6 +6,7 @@ from typing import List, Dict
 from agent_factory import AgentFactory
 from pydantic import BaseModel
 from enviroment_setup import setup_environment
+from fastapi.middleware.cors import CORSMiddleware
 
 # Set up environment variables and configuration
 config = setup_environment()
@@ -72,6 +73,20 @@ app = FastAPI(
     version="1.0.0",
 )
 
+origins = [
+    "http://localhost.tiangolo.com",
+    "https://localhost.tiangolo.com",
+    "http://localhost",
+    "http://localhost:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Dependency to get the DB instance and ensure it's connected for operations
 def get_database_instance():
