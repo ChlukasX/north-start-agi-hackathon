@@ -19,8 +19,8 @@ def load_and_process_osm_data(dataset_name="ns2agi/antwerp-osm-navigator"):
     print("Showing first 5 nodes:")
     print(node_dataset[:5])
 
-    print("\nConverting the first 100 nodes to a pandas DataFrame...")
-    df = node_dataset.select(range(100)).to_pandas()
+    print("\nConverting the all nodes to a pandas DataFrame...")
+    df = node_dataset.to_pandas()
 
     print("\nPandas DataFrame head:")
     print(df.head())
@@ -30,4 +30,11 @@ def load_and_process_osm_data(dataset_name="ns2agi/antwerp-osm-navigator"):
 
 if __name__ == "__main__":
     osm_dataframe = load_and_process_osm_data()
+    output_path = "osm_nodes.csv"
+    print(f"\nExporting DataFrame to {output_path}...")
+    osm_dataframe.to_csv(output_path, index=False)
+    print("Export complete.")
+
+    print("\nScript finished.")
+
     print("\nScript finished.")
